@@ -423,18 +423,25 @@ async function renderDashboard(main, r) {
   ]);
   const names = byId(persons, 'personid');
   const now = new Date();
-  const in7 = new Date(now.getTime() + 7 * 864e5);
   const apptTime = new Map(appts.map(a => [a.appointmentid, parseTs(a.appointmenttime)]));
 
-  const upcoming7 = appts.filter(a => { const d = apptTime.get(a.appointmentid); return d && d >= now && d < in7; }).length;
-  const thisMonth = appts.filter(a => { const d = apptTime.get(a.appointmentid); return d && d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth(); }).length;
+  // Date tiles that stay meaningful even when all appointments are in the past.
+  const allTimes = [...apptTime.values()].filter(Boolean);
+  const pastTimes = allTimes.filter(t => t < now);
+  const futureTimes = allTimes.filter(t => t >= now);
+  const mostRecent = pastTimes.length ? new Date(Math.max(...pastTimes)) : null;
+  const nextAppt = futureTimes.length ? new Date(Math.min(...futureTimes)) : null;
+  const fmtD = d => d.toLocaleDateString([], { dateStyle: 'medium' });
+  const recentMonthLabel = mostRecent ? mostRecent.toLocaleDateString([], { month: 'long', year: 'numeric' }) : null;
+  const recentMonthCount = mostRecent
+    ? allTimes.filter(t => t.getFullYear() === mostRecent.getFullYear() && t.getMonth() === mostRecent.getMonth()).length : 0;
+  const clientsSeen = new Set(sf.map(s => s.clientid)).size;
   const pastSf = sf.filter(s => { const d = apptTime.get(s.appointmentid); return d && d < now; });
   const recorded = pastSf.filter(s => s.kept !== null);
   const kept = recorded.filter(s => s.kept).length;
   const durations = appts.map(a => a.duration).filter(d => d != null);
   const avgDur = durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : null;
   const referred = clients.filter(c => c.referredby != null).length;
-  const activeClients = new Set(sf.filter(s => { const d = apptTime.get(s.appointmentid); return d && d >= now; }).map(s => s.clientid)).size;
   const famSizes = families.map(f => mif.filter(m => m.familyid === f.familyid).length);
   const avgFam = famSizes.length ? (famSizes.reduce((a, b) => a + b, 0) / famSizes.length).toFixed(1) : '—';
 
@@ -493,14 +500,15 @@ async function renderDashboard(main, r) {
     <p class="muted">Calculated live from the RAFT database · ${esc(now.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }))}</p>
     <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); margin-top:1rem">
       ${stat(clients.length, 'Clients')}
-      ${stat(activeClients, 'Clients with upcoming appointments')}
+      ${stat(clientsSeen, 'Clients with at least one appointment')}
       ${stat(counselors.length, 'Counselors')}
       ${stat(employees.length, 'Employees')}
       ${stat(families.length, 'Families')}
       ${stat(rooms.length, 'Rooms')}
       ${stat(appts.length, 'Appointments (all time)')}
-      ${stat(upcoming7, 'Appointments in the next 7 days')}
-      ${stat(thisMonth, 'Appointments this month')}
+      ${stat(mostRecent ? fmtD(mostRecent) : '—', 'Most recent appointment')}
+      ${stat(nextAppt ? fmtD(nextAppt) : 'None scheduled', 'Next scheduled appointment')}
+      ${stat(recentMonthCount, recentMonthLabel ? `Appointments in ${recentMonthLabel} (month of the most recent)` : 'Appointments in the most recent month')}
       ${stat(pct(kept, recorded.length), `Kept rate (${kept} of ${recorded.length} recorded)`)}
       ${stat(avgDur != null ? avgDur + ' min' : '—', 'Average appointment length')}
       ${stat(pct(referred, clients.length), `Clients referred by a client (${referred})`)}
