@@ -68,7 +68,6 @@ function parseTs(s) {
   return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) : null;
 }
 const fmtTs = s => { const d = parseTs(s); return d ? d.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '—'; };
-const fmtTime = s => { const d = parseTs(s); return d ? d.toLocaleTimeString([], { timeStyle: 'short' }) : '—'; };
 // "date" columns: format without converting through UTC.
 function fmtDate(s) {
   if (!s) return '—';
@@ -219,11 +218,14 @@ async function loadNames(ids) {
 }
 
 /* ---------- Screen 1: Home ---------- */
-async function renderHome(main, r) {
-  const now = new Date();
-  const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+const HOME_LIMIT = 10;
+// "timestamp" literal for the current local time, to compare against appointmenttime.
+function nowTs() {
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:00`;
+}
 
+async function renderHome(main, r) {
   main.innerHTML = `
     <h1>Welcome</h1>
     <p class="muted">Signed in as ${esc(session.user.email)} · Role: <strong>${esc(r.label)}</strong></p>
@@ -234,14 +236,26 @@ async function renderHome(main, r) {
         r.editRecords ? 'Add a new client or appointment, or change an existing one.'
                       : 'Update session notes, homework assignments and whether appointments were kept.'}</a>
     </div>
-    <h2>Today’s appointments</h2>
+    <h2 id="appts-heading">Appointments</h2>
     <div class="card" id="today"><p class="loading">Loading…</p></div>`;
 
   try {
-    const appts = await fetchAll('appointment', apptCols(r), ['appointmenttime'],
-      b => b.gte('appointmenttime', ymd(now)).lt('appointmenttime', ymd(tomorrow)));
+    const cols = 'appointmentid,appointmenttime,duration,counselorid,roomnumber';
+    const now = nowTs();
+    // Upcoming appointments first; if there are none, the most recent past ones.
+    let appts = await run(sb.from('appointment').select(cols)
+      .gte('appointmenttime', now).order('appointmenttime').limit(HOME_LIMIT));
+    let heading = 'Upcoming appointments';
+    if (!appts.length) {
+      appts = await run(sb.from('appointment').select(cols)
+        .lt('appointmenttime', now).order('appointmenttime', { ascending: false }).limit(HOME_LIMIT));
+      heading = 'Most recent appointments';
+    }
+    $('#appts-heading').textContent = heading;
     const box = $('#today');
-    if (!appts.length) { box.innerHTML = '<p class="muted">No appointments today.</p>'; return; }
+    if (!appts.length) { box.innerHTML = '<p class="muted">There are no appointments in the database yet.</p>'; return; }
+    if (heading.startsWith('Most')) box.insertAdjacentHTML('beforebegin',
+      '<p class="muted" style="margin-top:-.25rem">Nothing is scheduled from now on, so these are the latest appointments on record.</p>');
     const ids = appts.map(a => a.appointmentid);
     const [sf, rooms] = await Promise.all([
       fetchIn('scheduledfor', 'appointmentid,clientid', 'appointmentid', ids),
@@ -250,9 +264,9 @@ async function renderHome(main, r) {
     const names = await loadNames([...appts.map(a => a.counselorid), ...sf.map(s => s.clientid)]);
     const roomMap = byId(rooms, 'roomnumber');
     box.innerHTML = `<div class="table-wrap"><table>
-      <thead><tr><th>Time</th><th>Clients</th><th>Counselor</th><th>Room</th><th class="num">Minutes</th></tr></thead>
+      <thead><tr><th>When</th><th>Clients</th><th>Counselor</th><th>Room</th><th class="num">Minutes</th></tr></thead>
       <tbody>${appts.map(a => `<tr>
-        <td>${fmtTime(a.appointmenttime)}</td>
+        <td>${fmtTs(a.appointmenttime)}</td>
         <td>${sf.filter(s => s.appointmentid === a.appointmentid)
               .map(s => `<a href="#/lookup?id=${s.clientid}">${esc(fullName(names.get(s.clientid)))}</a>`).join(', ') || '—'}</td>
         <td>${esc(fullName(names.get(a.counselorid)))}</td>
@@ -430,13 +444,21 @@ async function renderDashboard(main, r) {
     return [...m.entries()].sort((a, b) => b[1] - a[1]);
   };
 
-  // Appointments per month: 6 months back through 2 months ahead.
+  // Appointments per month: 6 months back through 2 months ahead of this month.
+  // If that window is empty (e.g. all appointments are in the past), center it on the latest appointment instead.
+  const times = [...apptTime.values()].filter(Boolean);
+  const inWindow = (t, a) => { const m = (t.getFullYear() - a.getFullYear()) * 12 + t.getMonth() - a.getMonth(); return m >= -6 && m <= 2; };
+  const latest = times.length ? new Date(Math.max(...times)) : now;
+  const anchor = times.some(t => inWindow(t, now)) ? now : latest;
   const months = [];
   for (let i = -6; i <= 2; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-    const n = appts.filter(a => { const t = apptTime.get(a.appointmentid); return t && t.getFullYear() === d.getFullYear() && t.getMonth() === d.getMonth(); }).length;
-    months.push([d.toLocaleDateString([], { month: 'short', year: 'numeric' }) + (i === 0 ? ' (this month)' : ''), n]);
+    const d = new Date(anchor.getFullYear(), anchor.getMonth() + i, 1);
+    const n = times.filter(t => t.getFullYear() === d.getFullYear() && t.getMonth() === d.getMonth()).length;
+    const isNow = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+    months.push([d.toLocaleDateString([], { month: 'short', year: 'numeric' }) + (isNow ? ' (this month)' : ''), n]);
   }
+  const monthsNote = anchor === now ? '' :
+    `<p class="muted" style="margin-top:0">No appointments around this month; showing the months around the latest appointment (${esc(latest.toLocaleDateString([], { dateStyle: 'medium' }))}).</p>`;
 
   const byCounselor = counselors.map(c => {
     const mine = appts.filter(a => a.counselorid === c.counselorid);
@@ -487,7 +509,7 @@ async function renderDashboard(main, r) {
     </div>
 
     <div class="two-col">
-      <div class="card"><h3 style="margin-top:0">Appointments by month</h3>${bars(months)}</div>
+      <div class="card"><h3 style="margin-top:0">Appointments by month</h3>${monthsNote}${bars(months)}</div>
       <div class="card"><h3 style="margin-top:0">How clients found RAFT</h3>${bars(count(clients, 'foundout'))}</div>
       <div class="card"><h3 style="margin-top:0">Reminder method</h3>${bars(count(clients, 'remindermethod'))}</div>
       <div class="card"><h3 style="margin-top:0">Room use</h3>
