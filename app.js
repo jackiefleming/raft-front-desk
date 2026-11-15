@@ -516,6 +516,14 @@ async function renderDashboard(main, r) {
       ${r.seeWage ? stat(wages.length ? '$' + (wages.reduce((a, b) => a + b, 0) / wages.length).toFixed(2) : '—', 'Average employee wage') : ''}
     </div>
 
+    <div class="card"><h3 style="margin-top:0">Counselor caseload</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Counselor</th><th class="num">Appointments</th><th class="num">Upcoming</th><th class="num">Distinct clients</th><th class="num">Kept rate</th></tr></thead>
+        <tbody>${byCounselor.map(c => `<tr><td>${esc(c.name)}</td><td class="num">${c.total}</td><td class="num">${c.upcoming}</td>
+          <td class="num">${c.clients}</td><td class="num">${c.keptRate}</td></tr>`).join('')}</tbody>
+      </table></div>
+    </div>
+
     <div class="two-col">
       <div class="card"><h3 style="margin-top:0">Appointments by month</h3>${monthsNote}${bars(months)}</div>
       <div class="card"><h3 style="margin-top:0">How clients found RAFT</h3>${bars(count(clients, 'foundout'))}</div>
@@ -524,14 +532,6 @@ async function renderDashboard(main, r) {
         <div class="table-wrap"><table><thead><tr><th>Room</th><th class="num">Appointments</th><th class="num">Hours booked</th></tr></thead>
         <tbody>${byRoom.map(([k, n, h]) => `<tr><td>${esc(k)}</td><td class="num">${n}</td><td class="num">${h}</td></tr>`).join('')}</tbody></table></div>
       </div>
-    </div>
-
-    <div class="card"><h3 style="margin-top:0">Counselor caseload</h3>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Counselor</th><th class="num">Appointments</th><th class="num">Upcoming</th><th class="num">Distinct clients</th><th class="num">Kept rate</th></tr></thead>
-        <tbody>${byCounselor.map(c => `<tr><td>${esc(c.name)}</td><td class="num">${c.total}</td><td class="num">${c.upcoming}</td>
-          <td class="num">${c.clients}</td><td class="num">${c.keptRate}</td></tr>`).join('')}</tbody>
-      </table></div>
     </div>`;
 }
 
